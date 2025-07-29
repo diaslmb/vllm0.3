@@ -288,6 +288,46 @@ class Processor:
         else:
             pooling_params = params.clone()
 
+        if sampling_params.ignore_cjk:
+            try:
+                print(">>> [DEBUG] Starting ignore_cjk logic")
+                tokenizer = self.tokenizer.get_lora_tokenizer(lora_request)
+                print(">>> [DEBUG] Got tokenizer")
+                vocab_size = tokenizer.vocab_size
+                print(f">>> [DEBUG] vocab_size: {vocab_size}")
+
+                allowed_chars = set()
+        # English letters
+                allowed_chars.update(chr(c) for c in range(ord('a'), ord('z') + 1))
+                allowed_chars.update(chr(c) for c in range(ord('A'), ord('Z') + 1))
+        # Cyrillic letters (includes Russian and Kazakh)
+                allowed_chars.update(chr(c) for c in range(0x0400, 0x0500))
+
+                banned_token_ids = []
+
+                for token_id in range(vocab_size):
+                    try:
+                        text = tokenizer.decode([token_id])
+                        if any(ch.isalpha() and ch not in allowed_chars for ch in text):
+                            banned_token_ids.append(token_id)
+                    except Exception as e:
+                        print(f"[WARN] Token decode failed for id={token_id}: {e}")
+                        continue
+
+                print(f">>> [DEBUG] Found {len(banned_token_ids)} banned tokens")
+
+                if sampling_params.logit_bias is None:
+                   sampling_params.logit_bias = {}
+
+                for token_id in banned_token_ids:
+                    sampling_params.logit_bias[token_id] = float('-inf')
+
+                print(f">>> [DEBUG] Applied logit_bias to {len(banned_token_ids)} tokens")
+
+            except Exception as e:
+                print(f"[ERROR] Failed applying CJK logit_bias: {e}")
+
+
         # Multimodal related.
         sorted_mm_inputs: Optional[Sequence[Optional[MultiModalKwargs]]] = None
         sorted_mm_positions: Optional[list[PlaceholderRange]] = None
